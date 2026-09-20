@@ -1,0 +1,39 @@
+{
+  "name": "@yantrikdb/opencode",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "YantrikDB cognitive memory for OpenCode (V2): deterministic boot digest, per-prompt recall, and pre-compaction capture, plus the yantrikdb MCP server.",
+  "license": "MIT",
+  "keywords": [
+    "yantrikdb",
+    "memory",
+    "recall",
+    "opencode",
+    "opencode-plugin"
+  ],
+  "homepage": "https://yantrikdb.com/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/avbel/yantrikdb-opencode.git"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@opencode/plugin": "^2.0.11"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "typescript": "^7.0.2"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test test/*.test.ts"
+  }
+}

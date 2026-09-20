@@ -1,0 +1,4 @@
+node_modules/
+.DS_Store
+.opencode/yantrikdb.json
+.yantrikdb.json
