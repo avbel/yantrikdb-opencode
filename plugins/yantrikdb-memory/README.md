@@ -7,8 +7,8 @@ model chooses to call a memory tool.
 
 | Lifecycle | What it does |
 |---|---|
-| `context` (fresh user turn) | Injects the boot digest (open conflicts, pending triggers, known unknowns, narrative head) and a per-prompt recall block into the request, framed as background context. |
-| `compaction` | Before context is discarded, drafts the user turns it contains into memory (redacted, line-watermarked). |
+| `context` (fresh user turn) | Injects the boot digest (where things stood, live decisions) with a short save policy, gated per-prompt recall, and a save check when the previous turn ran tools without saving. Framed as background context. |
+| `compaction` | Opt-in (`CAPTURE=true`): before context is discarded, drafts the user turns it contains into memory (redacted, line-watermarked). |
 | `session.deleted` (event) | Closes the tracked YantrikDB session and, when enabled, runs one `think()` hygiene pass. |
 | `mcp.transform` | Registers the `yantrikdb` MCP server so the model also gets all of the engine's tools and its golden-path playbook. |
 
@@ -56,6 +56,10 @@ Once published to npm:
 ```sh
 opencode plugin add @yantrikdb/opencode
 ```
+
+The key is `plugins`: OpenCode V2 silently ignores the V1 `plugin` key, which left this
+plugin unloaded with no error in the log. A configured directory must also have a root `server` or
+`index` entry (here `index.ts`); without one OpenCode skips it just as silently.
 
 Start a new session so the plugin and its MCP server are loaded. The MCP server is
 registered automatically unless `opencode.json(c)` already declares a server named
@@ -118,18 +122,26 @@ file, then the default. An empty value counts as unset and falls through.
 |---|---|---|
 | `NAMESPACE` | `default` | Memory namespace for reads and writes. |
 | `RECALL` | `true` | Per-prompt recall injection. |
-| `TOP_K` | `5` | Max hits considered per prompt. |
+| `TOP_K` | `3` | Max hits injected per prompt. |
+| `CANDIDATES` | `10` | Hits fetched before the relevance gate. |
 | `MIN_SCORE` | `0.10` | Absolute score floor for an injected hit. |
+| `MIN_SIMILARITY` | `0.50` | Semantic-lane cosine (from `why_retrieved`) an injected hit needs; keyword/graph-only hits are dropped. `0` disables it. About `0.60` suits the bundled 64-dim embedder. |
+| `EXCLUDE_NAMESPACES` | — | Comma-separated namespace prefixes never injected, e.g. `hermes:`. |
+| `RECALL_CAPTURED` | follows `CAPTURE` | Inject auto-captured prompts and consolidation merges made of them. |
 | `MIN_PROMPT_CHARS` | `24` | Shorter prompts are skipped. |
 | `RECALL_QUERY_CHARS` | `400` | Query truncation. |
 | `RECALL_BLOCK_CHARS` | `4000` | Cap on injected block text. |
 | `RECALL_TIMEOUT_MS` | `2500` | Per-recall HTTP timeout (the prompt path). |
 | `DIGEST` | `true` | Boot digest injection. |
-| `GAPS` | `true` | Include known-unknowns in the digest. |
+| `DIGEST_DECISIONS` | `5` | Live decisions shown in the digest. |
+| `DIGEST_MAINTENANCE` | `false` | Also show open conflicts and pending triggers. |
+| `GAPS` | follows `DIGEST_MAINTENANCE` | Include known-unknowns in the digest. |
 | `RECENT` | `6` | Rows in the empty-digest fallback. |
 | `FALLBACK` | `true` | Broad recall when the digest is empty. |
 | `TRACK_SESSION` | `true` | Open/close a tracked YantrikDB session. |
-| `CAPTURE` | `true` | Draft memories from the transcript at compaction. |
+| `CAPTURE` | `false` | Draft memories from the transcript at compaction. Drafts stayed near-verbatim prompts and dominated the store, so the model saves through MCP `remember` instead. |
+| `SAVE_NUDGE` | `true` | Save policy in the digest and a save check after turns that ran `SAVE_NUDGE_TOOLS` tool calls without a `remember`. |
+| `SAVE_NUDGE_TOOLS` | `6` | Tool calls a turn needs before an unsaved turn earns a save check. |
 | `CAPTURE_ROLES` | `user` | `user`, or `all` to include assistant turns. |
 | `CAPTURE_CHARS` | `6000` | Cap on drafted text. |
 | `CAPTURE_MIN_CHARS` | `200` | Below this, skip the round trip. |

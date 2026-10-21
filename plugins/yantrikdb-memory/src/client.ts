@@ -40,6 +40,8 @@ export interface RecallHit {
   importance: number | undefined;
   created_at: number | undefined;
   why_retrieved: string[] | undefined;
+  source: string | undefined;
+  metadata: Record<string, unknown> | undefined;
 }
 
 export interface YantrikClientOptions {
@@ -79,6 +81,16 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+/** The server sends metadata as an object or as its JSON text. */
+function metadataOf(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "string") return asRecord(value);
+  try {
+    return asRecord(JSON.parse(value));
+  } catch {
+    return undefined;
+  }
+}
+
 function toHit(value: unknown): RecallHit | undefined {
   const row = asRecord(value);
   if (!row) return undefined;
@@ -94,6 +106,8 @@ function toHit(value: unknown): RecallHit | undefined {
     importance: asNumber(row["importance"]),
     created_at: asNumber(row["created_at"]),
     why_retrieved: Array.isArray(why) ? why.filter((item): item is string => typeof item === "string") : undefined,
+    source: asString(row["source"]),
+    metadata: metadataOf(row["metadata"]),
   };
 }
 
@@ -131,6 +145,8 @@ export class YantrikClient {
     const query: Record<string, string> = {
       // The server deserializes this as a bool: "1"/"0" is a 400.
       include_gaps: options.includeGaps ? "true" : "false",
+      // Headroom for the superseded / excluded rows dropped while rendering.
+      max_decisions: "10",
       max_gaps: "5",
       max_conflicts: "5",
       max_triggers: "5",
@@ -164,7 +180,9 @@ export class YantrikClient {
     timeoutMs?: number;
   }): Promise<RecallHit[] | null> {
     const payload: Record<string, unknown> = { query: options.query, top_k: options.topK };
-    if (options.namespace !== undefined) payload["namespace"] = options.namespace;
+    // "default" means every namespace, as in the digest: a namespace filter hid all
+    // memories written by agents that name their project namespace.
+    if (options.namespace !== undefined && options.namespace !== "default") payload["namespace"] = options.namespace;
     const request: SendOptions = { body: payload };
     if (options.timeoutMs !== undefined) request.timeoutMs = options.timeoutMs;
     const body = asRecord(await this.json("POST", "/v1/recall", request));

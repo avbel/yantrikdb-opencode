@@ -98,6 +98,20 @@ function section(title: string, entries: string[], total?: number): string | und
   return `${header}\n${entries.join("\n")}`;
 }
 
+export interface DigestOptions {
+  snippetChars: number;
+  /** Live decisions shown; superseded rows and excluded namespaces are dropped first. */
+  decisions: number;
+  /** Also render conflicts, triggers and known gaps. */
+  maintenance: boolean;
+  excludedNamespaces: readonly string[];
+}
+
+function headText(value: unknown): string | undefined {
+  const record = asRecord(value);
+  return record ? (scalar(record["snippet"]) ?? scalar(record["text"])) : scalar(value);
+}
+
 /**
  * Boot digest. Anything the server returns beyond the rendered families is ignored;
  * a missing key renders as absent rather than throwing.
@@ -106,48 +120,68 @@ export function renderDigest(
   digest: Record<string, unknown> | null,
   gaps: Array<Record<string, unknown>>,
   namespace: string,
-  caps: { snippetChars: number },
+  options: DigestOptions,
 ): string {
   const blocks: Array<string | undefined> = [];
 
-  blocks.push(
-    section(
-      "Open conflicts",
-      rows(digest?.["open_conflicts"]).map((row) => {
-        const kind = scalar(row["conflict_type"]) ?? "conflict";
-        const priority = scalar(row["priority"]);
-        const left = scalar(row["memory_a"]) ?? "?";
-        const right = scalar(row["memory_b"]) ?? "?";
-        return `- ${kind}${priority === undefined ? "" : ` (priority ${priority})`}: ${left} vs ${right}`;
-      }),
-      asNumber(digest?.["open_conflict_count"]),
-    ),
-  );
+  const head = headText(digest?.["narrative_head"]);
+  if (head !== undefined) blocks.push(`Where things stood\n${trimTo(collapse(head), options.snippetChars * 2)}`);
 
   blocks.push(
     section(
-      "Pending triggers",
-      rows(digest?.["pending_triggers"]).map((row) => {
-        const kind = scalar(row["trigger_type"]) ?? "trigger";
-        const reason = scalar(row["reason"]);
-        return `- ${kind}${reason === undefined ? "" : `: ${trimTo(collapse(reason), caps.snippetChars)}`}`;
-      }),
-      asNumber(digest?.["pending_trigger_count"]),
+      "Open decisions and high-signal memories",
+      rows(digest?.["top_decisions"])
+        .filter((row) => {
+          if (row["superseded_by"] !== undefined && row["superseded_by"] !== null) return false;
+          const space = scalar(row["namespace"]) ?? "";
+          return !options.excludedNamespaces.some((prefix) => space.startsWith(prefix));
+        })
+        .slice(0, options.decisions)
+        .flatMap((row) => {
+          const text = scalar(row["snippet"]) ?? scalar(row["text"]);
+          if (text === undefined) return [];
+          return [`- ${trimTo(collapse(text), options.snippetChars)} (${ageLabel(asNumber(row["created_at"]))})`];
+        }),
     ),
   );
 
-  blocks.push(
-    section(
-      "Known unknowns",
-      gaps.map((row) => {
-        const query = scalar(row["query"]);
-        return `- ${query === undefined ? "?" : trimTo(collapse(query), caps.snippetChars)}`;
-      }),
-    ),
-  );
+  if (options.maintenance) {
+    blocks.push(
+      section(
+        "Open conflicts",
+        rows(digest?.["open_conflicts"]).map((row) => {
+          const kind = scalar(row["conflict_type"]) ?? "conflict";
+          const priority = scalar(row["priority"]);
+          const left = scalar(row["memory_a"]) ?? "?";
+          const right = scalar(row["memory_b"]) ?? "?";
+          return `- ${kind}${priority === undefined ? "" : ` (priority ${priority})`}: ${left} vs ${right}`;
+        }),
+        asNumber(digest?.["open_conflict_count"]),
+      ),
+    );
 
-  const head = scalar(digest?.["narrative_head"]);
-  if (head !== undefined) blocks.push(`Narrative head\n${trimTo(collapse(head), caps.snippetChars * 2)}`);
+    blocks.push(
+      section(
+        "Pending triggers",
+        rows(digest?.["pending_triggers"]).map((row) => {
+          const kind = scalar(row["trigger_type"]) ?? "trigger";
+          const reason = scalar(row["reason"]);
+          return `- ${kind}${reason === undefined ? "" : `: ${trimTo(collapse(reason), options.snippetChars)}`}`;
+        }),
+        asNumber(digest?.["pending_trigger_count"]),
+      ),
+    );
+
+    blocks.push(
+      section(
+        "Known unknowns",
+        gaps.map((row) => {
+          const query = scalar(row["query"]);
+          return `- ${query === undefined ? "?" : trimTo(collapse(query), options.snippetChars)}`;
+        }),
+      ),
+    );
+  }
 
   const present = blocks.filter((block): block is string => block !== undefined);
   if (present.length === 0) return "";

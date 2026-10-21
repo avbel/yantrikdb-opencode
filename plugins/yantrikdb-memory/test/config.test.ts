@@ -94,9 +94,15 @@ test("resolveTunables uses defaults", () => {
     configureSettings(tempDir("ydb-cwd-"));
     const tunables = resolveTunables();
     assert.equal(tunables.namespace, "default");
-    assert.equal(tunables.topK, 5);
+    assert.equal(tunables.topK, 3);
     assert.equal(tunables.captureRoles, "user");
     assert.equal(tunables.maintenance, false);
+    assert.equal(tunables.capture, false, "capture is opt-in");
+    assert.equal(tunables.recallCaptured, false);
+    assert.equal(tunables.digestMaintenance, false);
+    assert.equal(tunables.gaps, false);
+    assert.equal(tunables.minSimilarity, 0.5);
+    assert.equal(tunables.saveNudge, true);
   });
 });
 
@@ -109,7 +115,7 @@ test("tunable precedence: OPENCODE over HOOKS over default", () => {
     assert.equal(resolveTunables().topK, 9);
     delete process.env["YANTRIKDB_OPENCODE_TOP_K"];
     delete process.env["YANTRIKDB_HOOKS_TOP_K"];
-    assert.equal(resolveTunables().topK, 5);
+    assert.equal(resolveTunables().topK, 3);
   });
 });
 

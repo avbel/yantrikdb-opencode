@@ -14,8 +14,12 @@ function hit(partial: Partial<RecallHit> & { rid: string }): RecallHit {
     importance: partial.importance ?? undefined,
     created_at: partial.created_at ?? undefined,
     why_retrieved: partial.why_retrieved ?? undefined,
+    source: partial.source ?? undefined,
+    metadata: partial.metadata ?? undefined,
   };
 }
+
+const OPTIONS = { snippetChars: 240, decisions: 5, maintenance: false, excludedNamespaces: [] };
 
 test("collapse squeezes whitespace", () => {
   assert.equal(collapse("  a \n  b\tc "), "a b c");
@@ -33,8 +37,27 @@ test("extractText reads strings and text blocks", () => {
 });
 
 test("renderDigest is empty for an empty store", () => {
-  assert.equal(renderDigest(null, [], "default", { snippetChars: 240 }), "");
-  assert.equal(renderDigest({}, [], "default", { snippetChars: 240 }), "");
+  assert.equal(renderDigest(null, [], "default", OPTIONS), "");
+  assert.equal(renderDigest({}, [], "default", OPTIONS), "");
+});
+
+test("renderDigest lists live decisions and hides maintenance noise by default", () => {
+  const digest = {
+    narrative_head: { snippet: "Worked on the migration." },
+    top_decisions: [
+      { snippet: "Use Postgres 16.", superseded_by: null },
+      { snippet: "Use Postgres 15.", superseded_by: "r9" },
+      { snippet: "Hermes chat line.", namespace: "hermes:chat" },
+    ],
+    open_conflicts: [{ conflict_type: "value", memory_a: "a", memory_b: "b" }],
+    pending_triggers: [{ trigger_type: "relationship_insight", reason: "Entity 'API' is a hub" }],
+  };
+  const out = renderDigest(digest, [{ query: "deploy target" }], "default", { ...OPTIONS, excludedNamespaces: ["hermes:"] });
+  assert.match(out, /Worked on the migration\./);
+  assert.match(out, /Use Postgres 16\./);
+  assert.ok(!out.includes("Postgres 15"), "superseded decisions are dropped");
+  assert.ok(!out.includes("Hermes"), "excluded namespaces are dropped");
+  assert.ok(!/hub|conflict|deploy target/.test(out), "maintenance sections are opt-in");
 });
 
 test("renderDigest renders present sections with a namespace header", () => {
@@ -44,7 +67,7 @@ test("renderDigest renders present sections with a namespace header", () => {
     open_conflict_count: 1,
     pending_triggers: [{ trigger_type: "stale", reason: "review the plan" }],
   };
-  const out = renderDigest(digest, [{ query: "what is the deploy target" }], "team", { snippetChars: 240 });
+  const out = renderDigest(digest, [{ query: "what is the deploy target" }], "team", { ...OPTIONS, maintenance: true });
   assert.match(out, /^## YantrikDB memory \(namespace: team\)/);
   assert.match(out, /Where things stood|Narrative head/);
   assert.match(out, /Python 3.11 vs Python 3.12/);

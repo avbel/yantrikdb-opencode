@@ -122,7 +122,7 @@ function makeHarness(directory: string): Harness {
 }
 
 const savedEnv = new Map<string, string | undefined>();
-const WATCHED = ["YANTRIKDB_SERVER_URL", "YANTRIKDB_TOKEN", "XDG_CONFIG_HOME", "YANTRIKDB_OPENCODE_CAPTURE_MIN_CHARS"];
+const WATCHED = ["YANTRIKDB_SERVER_URL", "YANTRIKDB_TOKEN", "XDG_CONFIG_HOME", "YANTRIKDB_OPENCODE_CAPTURE_MIN_CHARS", "YANTRIKDB_OPENCODE_CAPTURE"];
 
 beforeEach(() => {
   for (const key of WATCHED) savedEnv.set(key, process.env[key]);
@@ -169,8 +169,10 @@ test("context injects the digest and floor-filtered recall, deduping on repeat",
       match: "/v1/recall",
       json: {
         results: [
-          { rid: "r1", text: "We chose Postgres.", score: 0.9 },
-          { rid: "r2", text: "Low score hit", score: 0.02 },
+          { rid: "r1", text: "We chose Postgres.", score: 0.9, why_retrieved: ["semantically similar (0.71)"] },
+          { rid: "r2", text: "Low score hit", score: 0.02, why_retrieved: ["semantically similar (0.70)"] },
+          { rid: "r3", text: "Keyword-only hit", score: 0.8, why_retrieved: ["keyword_match"] },
+          { rid: "r4", text: "Captured prompt", score: 0.8, source: "session_auto_capture", why_retrieved: ["semantically similar (0.9)"] },
         ],
       },
     },
@@ -194,6 +196,9 @@ test("context injects the digest and floor-filtered recall, deduping on repeat",
   assert.match(text, /We chose Postgres\./);
   assert.match(text, /<yantrikdb-memory namespace="default">/);
   assert.ok(!text.includes("Low score hit"), "hits below the score floor must be dropped");
+  assert.ok(!text.includes("Keyword-only hit"), "hits without a semantic match must be dropped");
+  assert.ok(!text.includes("Captured prompt"), "auto-captured prompts must be dropped");
+  assert.match(text, /Saving: when the user settles a decision/);
   assert.ok(
     calls.some((call) => call.method === "POST" && call.url.includes("/v1/sessions")),
     "a tracked session must be opened",
@@ -215,6 +220,34 @@ test("context injects the digest and floor-filtered recall, deduping on repeat",
   // on every turn.
   const digestCalls = calls.filter((call) => call.url.includes("/v1/session/digest"));
   assert.equal(digestCalls.length, 1, "the boot digest must be fetched once per session");
+});
+
+test("context adds a save check after a working turn that saved nothing", async () => {
+  process.env["YANTRIKDB_SERVER_URL"] = "http://store.test";
+  stubFetch([{ method: "GET", match: "/v1/health", json: { cluster: { accepts_writes: true } } }]);
+  const harness = makeHarness(mkdtempSync(path.join(tmpdir(), "ydb-open-")));
+  await plugin.setup(harness.ctx as never);
+  const work = Array.from({ length: 6 }, (_, index) => ({
+    role: "assistant",
+    content: [{ type: "tool-call", id: `c${index}`, name: "execute", input: { code: "await tools.bash({cmd: 'pnpm test'})" } }],
+  }));
+  const run = async (saved: boolean) => {
+    const system: Array<{ type: "text"; text: string }> = [];
+    const save = { role: "assistant", content: [{ type: "tool-call", id: "s", name: "execute", input: { code: "await tools.yantrikdb.remember({text: 'x'})" } }] };
+    await harness.hooks.get("context")?.({
+      sessionID: "ses_n",
+      system,
+      messages: [
+        { role: "user", content: [{ type: "text", text: "Port the share links." }] },
+        ...work,
+        ...(saved ? [save] : []),
+        { role: "user", content: [{ type: "text", text: "commit it" }] },
+      ],
+    });
+    return system.map((part) => part.text).join("\n");
+  };
+  assert.match(await run(false), /previous turn ran 6 tool calls and saved nothing/);
+  assert.ok(!(await run(true)).includes("save check"), "a turn that saved earns no note");
 });
 
 test("context ignores tool-loop continuations", async () => {
@@ -239,6 +272,7 @@ test("context ignores tool-loop continuations", async () => {
 test("compaction drafts user turns once, watermarked across retries", async () => {
   process.env["YANTRIKDB_SERVER_URL"] = "http://store.test";
   process.env["YANTRIKDB_OPENCODE_CAPTURE_MIN_CHARS"] = "1";
+  process.env["YANTRIKDB_OPENCODE_CAPTURE"] = "1";
   const calls = stubFetch([
     { method: "GET", match: "/v1/health", json: { cluster: { accepts_writes: true } } },
     { method: "POST", match: "/v1/sessions", text: JSON.stringify("sess-1") },

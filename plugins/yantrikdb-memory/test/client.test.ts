@@ -67,9 +67,11 @@ test("recall probes the leader and parses hits", async () => {
     importance: undefined,
     created_at: undefined,
     why_retrieved: undefined,
+    source: undefined,
+    metadata: undefined,
   });
   const recall = calls.find((call) => call.url.includes("/v1/recall"));
-  assert.deepEqual(recall?.body, { query: "q", top_k: 3, namespace: "default" });
+  assert.deepEqual(recall?.body, { query: "q", top_k: 3 }, "the default namespace searches every namespace");
   assert.equal((calls[0] as { method: string }).method, "GET");
   assert.match((calls[0] as { url: string }).url, /\/v1\/health$/);
 });

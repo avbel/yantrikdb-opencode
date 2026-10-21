@@ -38,7 +38,9 @@ import {
   renderRecent,
   renderRecallBlock,
 } from "./format.ts";
+import { SAVE_POLICY, saveNote } from "./nudge.ts";
 import { redact } from "./redact.ts";
+import { filterHits } from "./relevance.ts";
 import {
   EMPTY_STATE,
   markOf,
@@ -200,15 +202,27 @@ export default Plugin.define({
       }
     };
 
+    const gate = {
+      minSimilarity: tunables.minSimilarity,
+      includeCaptured: tunables.recallCaptured,
+      excludedNamespaces: tunables.excludedNamespaces,
+    };
+
     /** Digest, then the broad-recall fallback when the store has nothing to brief on. */
     const buildDigestBlock = async (active: YantrikClient, namespace: string): Promise<string> => {
       const gaps = tunables.gaps ? await active.gaps({ minCount: 2, limit: MAX_GAPS }) : [];
       const digest = await active.digest({ namespace, includeGaps: tunables.gaps });
-      let block = renderDigest(digest, gaps, namespace, { snippetChars: DIGEST_SNIPPET_CHARS });
+      let block = renderDigest(digest, gaps, namespace, {
+        snippetChars: DIGEST_SNIPPET_CHARS,
+        decisions: tunables.digestDecisions,
+        maintenance: tunables.digestMaintenance,
+        excludedNamespaces: tunables.excludedNamespaces,
+      });
       if (block === "" && tunables.fallback) {
-        const hits = (await active.recall({ query: RECENT_QUERY, topK: tunables.recent, namespace })) ?? [];
-        block = renderRecent(hits, namespace);
+        const hits = (await active.recall({ query: RECENT_QUERY, topK: tunables.candidates, namespace })) ?? [];
+        block = renderRecent(filterHits(hits, { ...gate, minSimilarity: 0 }).slice(0, tunables.recent), namespace);
       }
+      if (tunables.saveNudge) block = block === "" ? `${DIGEST_SENTINEL}\n\n${SAVE_POLICY}` : `${block}\n\n${SAVE_POLICY}`;
       return block;
     };
 
@@ -255,12 +269,12 @@ export default Plugin.define({
         const hits =
           (await active.recall({
             query,
-            topK: tunables.topK,
+            topK: tunables.candidates,
             namespace: state.namespace,
             timeoutMs: tunables.recallTimeoutMs,
           })) ?? [];
         const known = new Set(state.injectedRids);
-        const kept = hits
+        const kept = filterHits(hits, gate)
           .filter((hit) => hit.score >= tunables.minScore && !known.has(hit.rid))
           .sort((left, right) => right.score - left.score)
           .slice(0, tunables.topK);
@@ -277,6 +291,9 @@ export default Plugin.define({
 
       await persistState(event.sessionID, state);
 
+      // Per call, not cached: it describes the turn that just ended.
+      const note = tunables.saveNudge ? saveNote(event.messages, tunables.saveNudgeTools) : "";
+      if (note !== "") blocks.push(note);
       if (blocks.length === 0) return;
       event.system.push({ type: "text", text: blocks.join("\n\n") });
     };

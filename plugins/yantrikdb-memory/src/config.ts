@@ -27,12 +27,18 @@ export interface Tunables {
   namespace: string;
   recall: boolean;
   topK: number;
+  candidates: number;
   minScore: number;
+  minSimilarity: number;
+  excludedNamespaces: string[];
+  recallCaptured: boolean;
   minPromptChars: number;
   recallQueryChars: number;
   recallBlockChars: number;
   recallTimeoutMs: number;
   digest: boolean;
+  digestDecisions: number;
+  digestMaintenance: boolean;
   gaps: boolean;
   recent: number;
   fallback: boolean;
@@ -46,6 +52,8 @@ export interface Tunables {
   maintenance: boolean;
   maintenanceTimeoutMs: number;
   redact: boolean;
+  saveNudge: boolean;
+  saveNudgeTools: number;
   httpTimeoutMs: number;
   unreachableTtlMs: number;
   debug: boolean;
@@ -176,11 +184,26 @@ function envFlag(suffix: string, fallback: boolean): boolean {
 
 export function resolveTunables(): Tunables {
   const roles = envRaw("CAPTURE_ROLES")?.trim().toLowerCase();
+  // Off by default: drafted user turns were 65 % of a measured store (2026-10) and were
+  // almost never useful when recalled. The model saves through MCP `remember` instead.
+  const capture = envFlag("CAPTURE", false);
+  // Conflict rid pairs, trigger counts and gaps gave the model nothing it could act on.
+  const digestMaintenance = envFlag("DIGEST_MAINTENANCE", false);
   return {
     namespace: envRaw("NAMESPACE")?.trim() || "default",
     recall: envFlag("RECALL", true),
-    topK: envNumber("TOP_K", 5),
+    topK: envNumber("TOP_K", 3),
+    // Over-fetch: the relevance gate usually discards most raw hits.
+    candidates: envNumber("CANDIDATES", 10),
     minScore: envNumber("MIN_SCORE", 0.1),
+    // Semantic-lane cosine from `why_retrieved`; 0.50 suits the server's MiniLM-384
+    // embedder (about 0.60 for the bundled 64-dim one). 0 disables the gate.
+    minSimilarity: envNumber("MIN_SIMILARITY", 0.5),
+    excludedNamespaces: (envRaw("EXCLUDE_NAMESPACES") ?? "")
+      .split(",")
+      .map((prefix) => prefix.trim())
+      .filter((prefix) => prefix !== ""),
+    recallCaptured: envFlag("RECALL_CAPTURED", capture),
     minPromptChars: envNumber("MIN_PROMPT_CHARS", 24),
     recallQueryChars: envNumber("RECALL_QUERY_CHARS", 400),
     recallBlockChars: envNumber("RECALL_BLOCK_CHARS", 4000),
@@ -188,11 +211,13 @@ export function resolveTunables(): Tunables {
     // the cold path while staying within a reasonable per-prompt budget.
     recallTimeoutMs: envNumber("RECALL_TIMEOUT_MS", 2500),
     digest: envFlag("DIGEST", true),
-    gaps: envFlag("GAPS", true),
+    digestDecisions: envNumber("DIGEST_DECISIONS", 5),
+    digestMaintenance,
+    gaps: envFlag("GAPS", digestMaintenance),
     recent: envNumber("RECENT", 6),
     fallback: envFlag("FALLBACK", true),
     trackSession: envFlag("TRACK_SESSION", true),
-    capture: envFlag("CAPTURE", true),
+    capture,
     captureRoles: roles === "all" ? "all" : "user",
     captureChars: envNumber("CAPTURE_CHARS", 6000),
     captureMinChars: envNumber("CAPTURE_MIN_CHARS", 200),
@@ -208,6 +233,8 @@ export function resolveTunables(): Tunables {
     // (5s) is far below the observed cycle time, so maintenance would always abort.
     maintenanceTimeoutMs: envNumber("MAINTENANCE_TIMEOUT_MS", 30_000),
     redact: envFlag("REDACT", true),
+    saveNudge: envFlag("SAVE_NUDGE", true),
+    saveNudgeTools: envNumber("SAVE_NUDGE_TOOLS", 6),
     httpTimeoutMs: envNumber("HTTP_TIMEOUT_MS", 5000),
     unreachableTtlMs: envNumber("UNREACHABLE_TTL_MS", 60_000),
     debug: envFlag("DEBUG", false),
