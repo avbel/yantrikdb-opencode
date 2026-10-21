@@ -65,6 +65,23 @@ Start a new session so the plugin and its MCP server are loaded. The MCP server 
 registered automatically unless `opencode.json(c)` already declares a server named
 `yantrikdb`.
 
+### Default model
+
+The plugin works with any model that calls MCP tools. A free default is
+`opencode/deepseek-v4.1-flash-free`, set at the top level of `opencode.json(c)`:
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/deepseek-v4.1-flash-free",
+  "plugins": ["./plugins/yantrikdb-memory"]
+}
+```
+
+Free endpoints drop out now and then with `Upstream request failed: Endpoint is unavailable`;
+pick another model for that run with `opencode run -m opencode/glm-5.3-flash-free ...`.
+`opencode models | grep free` lists the current free models.
+
 ## Where the store coordinates come from
 
 `YANTRIKDB_SERVER_URL` (comma-separated nodes) and `YANTRIKDB_TOKEN` are read from the
